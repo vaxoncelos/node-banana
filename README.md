@@ -1,6 +1,6 @@
 # Node Banana
 
-> **Important note:** This is in very early development, highly unfinished, and is probably riddled with issues. Use Chrome, works on my machine.
+> **Important note:** This is in very early development, highly unfinished, and probably has many issues. Use Chrome, works on my machine.
 
 Node Banana is node-based workflow application for generating images with NBP. Build image generation pipelines by connecting nodes on a visual canvas. Built mainly with Opus 4.5.
 
@@ -59,6 +59,13 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 npm run build
 npm run start
 ```
+
+## Example Workflows
+
+The `/examples` directory contains example workflow files. To try them:
+
+1. Start the dev server with `npm run dev`
+2. Drag any `.json` file from the `/examples` folder into the browser window
 
 ## Usage
 
