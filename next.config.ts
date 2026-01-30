@@ -7,6 +7,9 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "50mb",
     },
   },
+  outputFileTracingExcludes: {
+    "*": ["./public/examples/**/*"],
+  },
   turbopack: {
     root: __dirname,
   },

@@ -64,10 +64,10 @@ npm run start
 
 ## Example Workflows
 
-The `/examples` directory contains some example workflow files from my personal projects. To try them:
+The `/public/examples` directory contains some example workflow files from my personal projects. To try them:
 
 1. Start the dev server with `npm run dev`
-2. Drag any `.json` file from the `/examples` folder into the browser window
+2. Drag any `.json` file from the `/public/examples` folder into the browser window
 3. Make sure you review each of the prompts before starting, these are fairly targetted to the examples. 
 
 ## Usage
