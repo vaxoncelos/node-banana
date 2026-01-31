@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore, saveNanoBananaDefaults } from "@/store/workflowStore";
@@ -22,8 +22,6 @@ type NanoBananaNodeType = Node<NanoBananaNodeData, "nanoBanana">;
 export function NanoBananaNode({ id, data, selected }: NodeProps<NanoBananaNodeType>) {
   const nodeData = data;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
-  const generationsPath = useWorkflowStore((state) => state.generationsPath);
-  const [isLoadingCarouselImage, setIsLoadingCarouselImage] = useState(false);
 
   const handleAspectRatioChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -61,6 +59,20 @@ export function NanoBananaNode({ id, data, selected }: NodeProps<NanoBananaNodeT
     [id, updateNodeData]
   );
 
+  const handleSeedChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value;
+      const seed = value === "" ? null : parseInt(value, 10);
+      updateNodeData(id, { seed });
+    },
+    [id, updateNodeData]
+  );
+
+  const handleRandomizeSeed = useCallback(() => {
+    const seed = Math.floor(Math.random() * 2147483647);
+    updateNodeData(id, { seed });
+  }, [id, updateNodeData]);
+
   const handleClearImage = useCallback(() => {
     updateNodeData(id, { outputImage: null, status: "idle", error: null });
   }, [id, updateNodeData]);
@@ -72,74 +84,41 @@ export function NanoBananaNode({ id, data, selected }: NodeProps<NanoBananaNodeT
     regenerateNode(id);
   }, [id, regenerateNode]);
 
-  const loadImageById = useCallback(async (imageId: string) => {
-    if (!generationsPath) {
-      console.error("Generations path not configured");
-      return null;
-    }
+  const duplicateNode = useWorkflowStore((state) => state.duplicateNode);
 
-    try {
-      const response = await fetch("/api/load-generation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          directoryPath: generationsPath,
-          imageId,
-        }),
-      });
+  const handleDuplicate = useCallback(() => {
+    duplicateNode(id);
+  }, [id, duplicateNode]);
 
-      if (!response.ok) {
-        console.error("Failed to load image:", await response.text());
-        return null;
-      }
-
-      const result = await response.json();
-      return result.success ? result.image : null;
-    } catch (error) {
-      console.error("Error loading image:", error);
-      return null;
-    }
-  }, [generationsPath]);
-
-  const handleCarouselPrevious = useCallback(async () => {
+  const handleCarouselPrevious = useCallback(() => {
     const history = nodeData.imageHistory || [];
-    if (history.length === 0 || isLoadingCarouselImage) return;
+    if (history.length === 0) return;
 
     const currentIndex = nodeData.selectedHistoryIndex || 0;
     const newIndex = currentIndex === 0 ? history.length - 1 : currentIndex - 1;
     const imageItem = history[newIndex];
 
-    setIsLoadingCarouselImage(true);
-    const image = await loadImageById(imageItem.id);
-    setIsLoadingCarouselImage(false);
+    // Use stored image data directly - no need to load from disk
+    updateNodeData(id, {
+      outputImage: imageItem.image,
+      selectedHistoryIndex: newIndex,
+    });
+  }, [id, nodeData.imageHistory, nodeData.selectedHistoryIndex, updateNodeData]);
 
-    if (image) {
-      updateNodeData(id, {
-        outputImage: image,
-        selectedHistoryIndex: newIndex,
-      });
-    }
-  }, [id, nodeData.imageHistory, nodeData.selectedHistoryIndex, isLoadingCarouselImage, loadImageById, updateNodeData]);
-
-  const handleCarouselNext = useCallback(async () => {
+  const handleCarouselNext = useCallback(() => {
     const history = nodeData.imageHistory || [];
-    if (history.length === 0 || isLoadingCarouselImage) return;
+    if (history.length === 0) return;
 
     const currentIndex = nodeData.selectedHistoryIndex || 0;
     const newIndex = (currentIndex + 1) % history.length;
     const imageItem = history[newIndex];
 
-    setIsLoadingCarouselImage(true);
-    const image = await loadImageById(imageItem.id);
-    setIsLoadingCarouselImage(false);
-
-    if (image) {
-      updateNodeData(id, {
-        outputImage: image,
-        selectedHistoryIndex: newIndex,
-      });
-    }
-  }, [id, nodeData.imageHistory, nodeData.selectedHistoryIndex, isLoadingCarouselImage, loadImageById, updateNodeData]);
+    // Use stored image data directly - no need to load from disk
+    updateNodeData(id, {
+      outputImage: imageItem.image,
+      selectedHistoryIndex: newIndex,
+    });
+  }, [id, nodeData.imageHistory, nodeData.selectedHistoryIndex, updateNodeData]);
 
   const isNanoBananaPro = nodeData.model === "nano-banana-pro";
   const hasCarouselImages = (nodeData.imageHistory || []).length > 1;
@@ -153,6 +132,7 @@ export function NanoBananaNode({ id, data, selected }: NodeProps<NanoBananaNodeT
       onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
       onCommentChange={(comment) => updateNodeData(id, { comment: comment || undefined })}
       onRun={handleRegenerate}
+      onDuplicate={handleDuplicate}
       selected={selected}
       isExecuting={isRunning}
       hasError={nodeData.status === "error"}
@@ -216,30 +196,7 @@ export function NanoBananaNode({ id, data, selected }: NodeProps<NanoBananaNodeT
                   </svg>
                 </div>
               )}
-              {/* Loading overlay for carousel navigation */}
-              {isLoadingCarouselImage && (
-                <div className="absolute inset-0 bg-neutral-900/50 rounded flex items-center justify-center">
-                  <svg
-                    className="w-4 h-4 animate-spin text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="3"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    />
-                  </svg>
-                </div>
-              )}
+
               <div className="absolute top-1 right-1">
                 <button
                   onClick={handleClearImage}
@@ -258,8 +215,7 @@ export function NanoBananaNode({ id, data, selected }: NodeProps<NanoBananaNodeT
               <div className="flex items-center justify-center gap-2 shrink-0">
                 <button
                   onClick={handleCarouselPrevious}
-                  disabled={isLoadingCarouselImage}
-                  className="w-5 h-5 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center text-neutral-400 hover:text-white transition-colors"
+                  className="w-5 h-5 rounded bg-neutral-800 hover:bg-neutral-700 flex items-center justify-center text-neutral-400 hover:text-white transition-colors"
                   title="Previous image"
                 >
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -271,8 +227,7 @@ export function NanoBananaNode({ id, data, selected }: NodeProps<NanoBananaNodeT
                 </span>
                 <button
                   onClick={handleCarouselNext}
-                  disabled={isLoadingCarouselImage}
-                  className="w-5 h-5 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center text-neutral-400 hover:text-white transition-colors"
+                  className="w-5 h-5 rounded bg-neutral-800 hover:bg-neutral-700 flex items-center justify-center text-neutral-400 hover:text-white transition-colors"
                   title="Next image"
                 >
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -369,6 +324,29 @@ export function NanoBananaNode({ id, data, selected }: NodeProps<NanoBananaNodeT
             <span>Google Search</span>
           </label>
         )}
+
+        {/* Seed control */}
+        <div className="flex gap-1.5 shrink-0">
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={nodeData.seed ?? ""}
+            onChange={handleSeedChange}
+            placeholder="Random seed"
+            className="flex-1 text-[10px] py-1 px-1.5 border border-neutral-700 rounded bg-neutral-900/50 focus:outline-none focus:ring-1 focus:ring-neutral-600 text-neutral-300 placeholder:text-neutral-600"
+            title="Seed for reproducible results (leave empty for random)"
+          />
+          <button
+            onClick={handleRandomizeSeed}
+            className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 rounded text-[10px] text-neutral-400 hover:text-neutral-200 transition-colors"
+            title="Generate random seed"
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+        </div>
       </div>
     </BaseNode>
   );

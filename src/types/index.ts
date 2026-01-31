@@ -6,6 +6,7 @@ export type NodeType =
   | "annotation"
   | "prompt"
   | "nanoBanana"
+  | "styleTransfer"
   | "llmGenerate"
   | "splitGrid"
   | "output";
@@ -123,6 +124,7 @@ export interface ImageHistoryItem {
 // Carousel Image Item (for per-node history)
 export interface CarouselImageItem {
   id: string;
+  image: string;          // Base64 data URL - stored for carousel navigation
   timestamp: number;
   prompt: string;
   aspectRatio: AspectRatio;
@@ -138,10 +140,25 @@ export interface NanoBananaNodeData extends BaseNodeData {
   resolution: Resolution; // Only used by Nano Banana Pro
   model: ModelType;
   useGoogleSearch: boolean; // Only available for Nano Banana Pro
+  seed: number | null; // Random seed for reproducible results
   status: NodeStatus;
   error: string | null;
   imageHistory: CarouselImageItem[]; // Carousel history (IDs only)
   selectedHistoryIndex: number; // Currently selected image in carousel
+}
+
+// Style Transfer Node Data
+export interface StyleTransferNodeData extends BaseNodeData {
+  contentImage: string | null;
+  styleImage: string | null;
+  prompt: string;
+  outputImage: string | null;
+  strength: number; // 0-100, how much style to apply
+  aspectRatio: AspectRatio;
+  resolution: Resolution;
+  model: ModelType;
+  status: NodeStatus;
+  error: string | null;
 }
 
 // LLM Generate Node Data (Text Generation)
@@ -191,6 +208,7 @@ export type WorkflowNodeData =
   | AnnotationNodeData
   | PromptNodeData
   | NanoBananaNodeData
+  | StyleTransferNodeData
   | LLMGenerateNodeData
   | SplitGridNodeData
   | OutputNodeData;
@@ -219,6 +237,7 @@ export interface GenerateRequest {
   resolution?: Resolution; // Only for Nano Banana Pro
   model?: ModelType;
   useGoogleSearch?: boolean; // Only for Nano Banana Pro
+  seed?: number | null; // Random seed for reproducible results
 }
 
 export interface GenerateResponse {

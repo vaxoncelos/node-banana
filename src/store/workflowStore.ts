@@ -16,6 +16,7 @@ import {
   AnnotationNodeData,
   PromptNodeData,
   NanoBananaNodeData,
+  StyleTransferNodeData,
   LLMGenerateNodeData,
   SplitGridNodeData,
   OutputNodeData,
@@ -25,6 +26,7 @@ import {
   WorkflowCostData,
   NodeGroup,
   GroupColor,
+  BaseNodeData,
 } from "@/types";
 import { useToast } from "@/components/Toast";
 import { calculateGenerationCost } from "@/utils/costCalculator";
@@ -63,6 +65,7 @@ interface WorkflowStore {
   addNode: (type: NodeType, position: XYPosition) => string;
   updateNodeData: (nodeId: string, data: Partial<WorkflowNodeData>) => void;
   removeNode: (nodeId: string) => void;
+  duplicateNode: (nodeId: string) => string | null;
   onNodesChange: (changes: NodeChange<WorkflowNode>[]) => void;
 
   // Edge operations
@@ -108,7 +111,7 @@ interface WorkflowStore {
 
   // Helpers
   getNodeById: (id: string) => WorkflowNode | undefined;
-  getConnectedInputs: (nodeId: string) => { images: string[]; text: string | null };
+  getConnectedInputs: (nodeId: string) => { images: string[]; text: string | null; imageCommentPrompts: string[] };
   validateWorkflow: () => { valid: boolean; errors: string[] };
 
   // Global Image History
@@ -127,7 +130,7 @@ interface WorkflowStore {
   isSaving: boolean;
 
   // Auto-save actions
-  setWorkflowMetadata: (id: string, name: string, path: string, generationsPath: string | null) => void;
+  setWorkflowMetadata: (id: string, name: string, path: string | null, generationsPath: string | null) => void;
   setWorkflowName: (name: string) => void;
   setGenerationsPath: (path: string | null) => void;
   setAutoSaveEnabled: (enabled: boolean) => void;
@@ -174,11 +177,27 @@ const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         resolution: defaults.resolution,
         model: defaults.model,
         useGoogleSearch: defaults.useGoogleSearch,
+        seed: null, // Random seed by default
         status: "idle",
         error: null,
         imageHistory: [],
         selectedHistoryIndex: 0,
       } as NanoBananaNodeData;
+    }
+    case "styleTransfer": {
+      const defaults = loadNanoBananaDefaults();
+      return {
+        contentImage: null,
+        styleImage: null,
+        prompt: "",
+        outputImage: null,
+        strength: 70,
+        aspectRatio: defaults.aspectRatio,
+        resolution: defaults.resolution,
+        model: defaults.model,
+        status: "idle",
+        error: null,
+      } as StyleTransferNodeData;
     }
     case "llmGenerate":
       return {
@@ -234,6 +253,18 @@ export const GROUP_COLORS: Record<GroupColor, string> = {
 const GROUP_COLOR_ORDER: GroupColor[] = [
   "neutral", "blue", "green", "purple", "orange", "red"
 ];
+
+const buildCombinedPrompt = (baseText: string | null, imageCommentPrompts: string[]) => {
+  const promptParts: string[] = [];
+
+  if (baseText && baseText.trim()) {
+    promptParts.push(baseText.trim());
+  }
+
+  promptParts.push(...imageCommentPrompts);
+
+  return promptParts.join("\n");
+};
 
 // localStorage helpers for auto-save configs
 const STORAGE_KEY = "node-banana-workflow-configs";
@@ -371,6 +402,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       annotation: { width: 300, height: 280 },
       prompt: { width: 320, height: 220 },
       nanoBanana: { width: 300, height: 300 },
+      styleTransfer: { width: 320, height: 340 },
       llmGenerate: { width: 320, height: 360 },
       splitGrid: { width: 300, height: 320 },
       output: { width: 320, height: 320 },
@@ -413,6 +445,34 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       ),
       hasUnsavedChanges: true,
     }));
+  },
+
+  duplicateNode: (nodeId: string) => {
+    const { nodes } = get();
+    const nodeToDuplicate = nodes.find((n) => n.id === nodeId);
+    if (!nodeToDuplicate) return null;
+
+    // Generate new ID
+    const newId = `${nodeToDuplicate.type}-${++nodeIdCounter}`;
+
+    // Create duplicated node with offset position
+    const newNode: WorkflowNode = {
+      ...nodeToDuplicate,
+      id: newId,
+      position: {
+        x: nodeToDuplicate.position.x + 50,
+        y: nodeToDuplicate.position.y + 50,
+      },
+      data: JSON.parse(JSON.stringify(nodeToDuplicate.data)) as WorkflowNodeData, // Deep clone data
+      selected: false,
+    };
+
+    set((state) => ({
+      nodes: [...state.nodes, newNode],
+      hasUnsavedChanges: true,
+    }));
+
+    return newId;
   },
 
   onNodesChange: (changes: NodeChange<WorkflowNode>[]) => {
@@ -567,6 +627,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       annotation: { width: 300, height: 280 },
       prompt: { width: 320, height: 220 },
       nanoBanana: { width: 300, height: 300 },
+      styleTransfer: { width: 320, height: 340 },
       llmGenerate: { width: 320, height: 360 },
       splitGrid: { width: 300, height: 320 },
       output: { width: 320, height: 320 },
@@ -719,6 +780,42 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     const { edges, nodes } = get();
     const images: string[] = [];
     let text: string | null = null;
+    const imageCommentPrompts: string[] = [];
+
+    const buildImageCommentPrompt = (sourceNode: WorkflowNode) => {
+      const sourceData = sourceNode.data as BaseNodeData;
+      const comment = sourceData.comment?.trim();
+      if (!comment) return;
+
+      let baseTitle: string = sourceNode.type;
+      switch (sourceNode.type) {
+        case "imageInput":
+          baseTitle = "Image";
+          break;
+        case "annotation":
+          baseTitle = "Annotation";
+          break;
+        case "nanoBanana":
+          baseTitle = "Generate";
+          break;
+        case "styleTransfer":
+          baseTitle = "Style Transfer";
+          break;
+        case "output":
+          baseTitle = "Output";
+          break;
+        default:
+          baseTitle = sourceNode.type;
+      }
+
+      let label = sourceData.customTitle ? `${sourceData.customTitle} - ${baseTitle}` : baseTitle;
+      if (sourceNode.type === "imageInput") {
+        const filename = (sourceNode.data as ImageInputNodeData).filename;
+        if (filename) label = `${label} (${filename})`;
+      }
+
+      imageCommentPrompts.push(`${label}: ${comment}`);
+    };
 
     edges
       .filter((edge) => edge.target === nodeId)
@@ -728,7 +825,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
         const handleId = edge.targetHandle;
 
-        if (handleId === "image" || !handleId) {
+        if (handleId === "image" || handleId === "content" || handleId === "style" || !handleId) {
           // Get image from source node - collect all connected images
           if (sourceNode.type === "imageInput") {
             const sourceImage = (sourceNode.data as ImageInputNodeData).image;
@@ -739,7 +836,12 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           } else if (sourceNode.type === "nanoBanana") {
             const sourceImage = (sourceNode.data as NanoBananaNodeData).outputImage;
             if (sourceImage) images.push(sourceImage);
+          } else if (sourceNode.type === "styleTransfer") {
+            const sourceImage = (sourceNode.data as StyleTransferNodeData).outputImage;
+            if (sourceImage) images.push(sourceImage);
           }
+
+          buildImageCommentPrompt(sourceNode);
         }
 
         if (handleId === "text") {
@@ -751,11 +853,11 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         }
       });
 
-    return { images, text };
+    return { images, text, imageCommentPrompts };
   },
 
   validateWorkflow: () => {
-    const { nodes, edges } = get();
+    const { nodes, edges, getConnectedInputs } = get();
     const errors: string[] = [];
 
     // Check if there are any nodes
@@ -764,22 +866,33 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       return { valid: false, errors };
     }
 
-    // Check each Nano Banana node has required inputs
+    // Check each Nano Banana node has required text input (images are optional)
     nodes
       .filter((n) => n.type === "nanoBanana")
       .forEach((node) => {
-        const imageConnected = edges.some(
-          (e) => e.target === node.id && e.targetHandle === "image"
+        const { text, imageCommentPrompts } = getConnectedInputs(node.id);
+        const hasPrompt = !!text?.trim() || imageCommentPrompts.length > 0;
+        if (!hasPrompt) {
+          errors.push(`Generate node "${node.id}" missing text prompt or image comment`);
+        }
+      });
+
+    // Check Style Transfer nodes have required image inputs
+    nodes
+      .filter((n) => n.type === "styleTransfer")
+      .forEach((node) => {
+        const contentConnected = edges.some(
+          (e) => e.target === node.id && e.targetHandle === "content"
         );
-        const textConnected = edges.some(
-          (e) => e.target === node.id && e.targetHandle === "text"
+        const styleConnected = edges.some(
+          (e) => e.target === node.id && e.targetHandle === "style"
         );
 
-        if (!imageConnected) {
-          errors.push(`Generate node "${node.id}" missing image input`);
+        if (!contentConnected) {
+          errors.push(`Style Transfer node "${node.id}" missing content image input`);
         }
-        if (!textConnected) {
-          errors.push(`Generate node "${node.id}" missing text input`);
+        if (!styleConnected) {
+          errors.push(`Style Transfer node "${node.id}" missing style image input`);
         }
       });
 
@@ -946,17 +1059,18 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
             break;
 
           case "nanoBanana": {
-            const { images, text } = getConnectedInputs(node.id);
+            const { images, text, imageCommentPrompts } = getConnectedInputs(node.id);
+            const combinedPrompt = buildCombinedPrompt(text, imageCommentPrompts);
 
-            if (images.length === 0 || !text) {
-              logger.error('node.error', 'nanoBanana node missing inputs', {
+            if (!combinedPrompt) {
+              logger.error('node.error', 'nanoBanana node missing text prompt or image comment', {
                 nodeId: node.id,
-                hasImages: images.length > 0,
-                hasText: !!text,
+                hasText: !!text?.trim(),
+                imageCommentCount: imageCommentPrompts.length,
               });
               updateNodeData(node.id, {
                 status: "error",
-                error: "Missing image or text input",
+                error: "Missing text prompt or image comment",
               });
               set({ isRunning: false, currentNodeId: null });
               await logger.endSession();
@@ -965,7 +1079,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
             updateNodeData(node.id, {
               inputImages: images,
-              inputPrompt: text,
+              inputPrompt: combinedPrompt,
               status: "loading",
               error: null,
             });
@@ -975,11 +1089,12 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
               const requestPayload = {
                 images,
-                prompt: text,
+                prompt: combinedPrompt,
                 aspectRatio: nodeData.aspectRatio,
                 resolution: nodeData.resolution,
                 model: nodeData.model,
                 useGoogleSearch: nodeData.useGoogleSearch,
+                seed: nodeData.seed,
               };
 
               logger.info('api.gemini', 'Calling Gemini API for image generation', {
@@ -988,7 +1103,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
                 aspectRatio: nodeData.aspectRatio,
                 resolution: nodeData.resolution,
                 imageCount: images.length,
-                prompt: text,
+                prompt: combinedPrompt,
               });
 
               const response = await fetch("/api/generate", {
@@ -1035,16 +1150,17 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
                 get().addToGlobalHistory({
                   image: result.image,
                   timestamp,
-                  prompt: text,
+                  prompt: combinedPrompt,
                   aspectRatio: nodeData.aspectRatio,
                   model: nodeData.model,
                 });
 
-                // Add to node's carousel history
+                // Add to node's carousel history (include image data for instant navigation)
                 const newHistoryItem = {
                   id: imageId,
+                  image: result.image,  // Store image data for carousel navigation
                   timestamp,
-                  prompt: text,
+                  prompt: combinedPrompt,
                   aspectRatio: nodeData.aspectRatio,
                   model: nodeData.model,
                 };
@@ -1071,7 +1187,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
                     body: JSON.stringify({
                       directoryPath: genPath,
                       image: result.image,
-                      prompt: text,
+                      prompt: combinedPrompt,
                       imageId,
                     }),
                   }).catch((err) => {
@@ -1104,6 +1220,140 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
               }
 
               logger.error('node.error', 'nanoBanana node execution failed', {
+                nodeId: node.id,
+                errorMessage,
+              }, error instanceof Error ? error : undefined);
+
+              updateNodeData(node.id, {
+                status: "error",
+                error: errorMessage,
+              });
+              set({ isRunning: false, currentNodeId: null });
+              await logger.endSession();
+              return;
+            }
+            break;
+          }
+
+          case "styleTransfer": {
+            const { images, text } = getConnectedInputs(node.id);
+            const nodeData = node.data as StyleTransferNodeData;
+
+            // Get content and style images from connections or stored data
+            let contentImage = nodeData.contentImage;
+            let styleImage = nodeData.styleImage;
+
+            // Update from connected inputs if available
+            if (images.length >= 1) contentImage = images[0];
+            if (images.length >= 2) styleImage = images[1];
+
+            if (!contentImage || !styleImage) {
+              logger.error('node.error', 'styleTransfer node missing images', {
+                nodeId: node.id,
+                hasContent: !!contentImage,
+                hasStyle: !!styleImage,
+              });
+              updateNodeData(node.id, {
+                status: "error",
+                error: "Need both content and style images",
+              });
+              set({ isRunning: false, currentNodeId: null });
+              await logger.endSession();
+              return;
+            }
+
+            // Build prompt for style transfer
+            const strength = nodeData.strength;
+            const promptText = text || nodeData.prompt || "";
+            const transferPrompt = `Generate a new image combining these two images: Use the SUBJECT and COMPOSITION from the first image, and apply the ARTISTIC STYLE, COLOR PALETTE, and TEXTURE from the second image. ${promptText} Style intensity: ${strength}%. Create a single cohesive output image.`;
+
+            updateNodeData(node.id, {
+              contentImage,
+              styleImage,
+              status: "loading",
+              error: null,
+            });
+
+            try {
+              logger.info('api.styleTransfer', 'Calling API for style transfer', {
+                nodeId: node.id,
+                model: nodeData.model,
+                aspectRatio: nodeData.aspectRatio,
+                resolution: nodeData.resolution,
+                strength: nodeData.strength,
+              });
+
+              const response = await fetch("/api/generate", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  images: [contentImage, styleImage],
+                  prompt: transferPrompt,
+                  aspectRatio: nodeData.aspectRatio,
+                  resolution: nodeData.resolution,
+                  model: nodeData.model,
+                }),
+              });
+
+              if (!response.ok) {
+                const errorText = await response.text();
+                let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+                try {
+                  const errorJson = JSON.parse(errorText);
+                  errorMessage = errorJson.error || errorMessage;
+                } catch {
+                  if (errorText) errorMessage += ` - ${errorText.substring(0, 200)}`;
+                }
+
+                logger.error('api.error', 'Style transfer API request failed', {
+                  nodeId: node.id,
+                  status: response.status,
+                  errorMessage,
+                });
+
+                updateNodeData(node.id, {
+                  status: "error",
+                  error: errorMessage,
+                });
+                set({ isRunning: false, currentNodeId: null });
+                await logger.endSession();
+                return;
+              }
+
+              const result = await response.json();
+
+              if (result.success && result.image) {
+                updateNodeData(node.id, {
+                  outputImage: result.image,
+                  status: "complete",
+                  error: null,
+                });
+
+                // Track cost
+                const generationCost = calculateGenerationCost(nodeData.model, nodeData.resolution);
+                get().addIncurredCost(generationCost);
+              } else {
+                logger.error('api.error', 'Style transfer generation failed', {
+                  nodeId: node.id,
+                  error: result.error,
+                });
+                updateNodeData(node.id, {
+                  status: "error",
+                  error: result.error || "Style transfer failed",
+                });
+                set({ isRunning: false, currentNodeId: null });
+                await logger.endSession();
+                return;
+              }
+            } catch (error) {
+              let errorMessage = "Style transfer failed";
+              if (error instanceof Error) {
+                errorMessage = error.message;
+              }
+
+              logger.error('node.error', 'styleTransfer node execution failed', {
                 nodeId: node.id,
                 errorMessage,
               }, error instanceof Error ? error : undefined);
@@ -1384,18 +1634,20 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
         // Always get fresh connected inputs first, fall back to stored inputs only if not connected
         const inputs = getConnectedInputs(nodeId);
-        let images = inputs.images.length > 0 ? inputs.images : nodeData.inputImages;
-        let text = inputs.text ?? nodeData.inputPrompt;
+        const hasImageComments = inputs.imageCommentPrompts.length > 0;
+        const images = inputs.images.length > 0 ? inputs.images : nodeData.inputImages;
+        const baseText = inputs.text !== null ? inputs.text : (hasImageComments ? null : nodeData.inputPrompt);
+        const combinedPrompt = buildCombinedPrompt(baseText, inputs.imageCommentPrompts);
 
-        if (!images || images.length === 0 || !text) {
-          logger.error('node.error', 'nanoBanana regeneration failed: missing inputs', {
+        if (!combinedPrompt) {
+          logger.error('node.error', 'nanoBanana regeneration failed: missing text prompt or image comment', {
             nodeId,
-            hasImages: !!(images && images.length > 0),
-            hasText: !!text,
+            hasText: !!baseText?.trim(),
+            imageCommentCount: inputs.imageCommentPrompts.length,
           });
           updateNodeData(nodeId, {
             status: "error",
-            error: "Missing image or text input",
+            error: "Missing text prompt or image comment",
           });
           set({ isRunning: false, currentNodeId: null });
           await logger.endSession();
@@ -1403,6 +1655,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         }
 
         updateNodeData(nodeId, {
+          inputImages: images,
+          inputPrompt: combinedPrompt,
           status: "loading",
           error: null,
         });
@@ -1413,7 +1667,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           aspectRatio: nodeData.aspectRatio,
           resolution: nodeData.resolution,
           imageCount: images.length,
-          prompt: text,
+          prompt: combinedPrompt,
         });
 
         const response = await fetch("/api/generate", {
@@ -1421,11 +1675,12 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             images,
-            prompt: text,
+            prompt: combinedPrompt,
             aspectRatio: nodeData.aspectRatio,
             resolution: nodeData.resolution,
             model: nodeData.model,
             useGoogleSearch: nodeData.useGoogleSearch,
+            seed: nodeData.seed,
           }),
         });
 
@@ -1458,16 +1713,17 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           get().addToGlobalHistory({
             image: result.image,
             timestamp,
-            prompt: text,
+            prompt: combinedPrompt,
             aspectRatio: nodeData.aspectRatio,
             model: nodeData.model,
           });
 
-          // Add to node's carousel history
+          // Add to node's carousel history (include image data for instant navigation)
           const newHistoryItem = {
             id: imageId,
+            image: result.image,  // Store image data for carousel navigation
             timestamp,
-            prompt: text,
+            prompt: combinedPrompt,
             aspectRatio: nodeData.aspectRatio,
             model: nodeData.model,
           };
@@ -1494,7 +1750,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
               body: JSON.stringify({
                 directoryPath: genPath,
                 image: result.image,
-                prompt: text,
+                prompt: combinedPrompt,
                 imageId,
               }),
             }).catch((err) => {
@@ -1687,6 +1943,131 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           await logger.endSession();
           return;
         }
+      } else if (node.type === "styleTransfer") {
+        const nodeData = node.data as StyleTransferNodeData;
+
+        // Get fresh connected inputs
+        const inputs = getConnectedInputs(nodeId);
+        let contentImage = inputs.images[0] || nodeData.contentImage;
+        let styleImage = inputs.images[1] || nodeData.styleImage;
+
+        if (!contentImage || !styleImage) {
+          logger.error('node.error', 'styleTransfer regeneration failed: missing images', {
+            nodeId,
+            hasContent: !!contentImage,
+            hasStyle: !!styleImage,
+          });
+          updateNodeData(nodeId, {
+            status: "error",
+            error: "Need both content and style images",
+          });
+          set({ isRunning: false, currentNodeId: null });
+          await logger.endSession();
+          return;
+        }
+
+        // Build prompt for style transfer
+        const strength = nodeData.strength;
+        const promptText = inputs.text || nodeData.prompt || "";
+        const transferPrompt = `Generate a new image combining these two images: Use the SUBJECT and COMPOSITION from the first image, and apply the ARTISTIC STYLE, COLOR PALETTE, and TEXTURE from the second image. ${promptText} Style intensity: ${strength}%. Create a single cohesive output image.`;
+
+        updateNodeData(nodeId, {
+          contentImage,
+          styleImage,
+          status: "loading",
+          error: null,
+        });
+
+        try {
+          logger.info('api.styleTransfer', 'Calling API for style transfer regeneration', {
+            nodeId,
+            model: nodeData.model,
+            aspectRatio: nodeData.aspectRatio,
+            resolution: nodeData.resolution,
+            strength: nodeData.strength,
+          });
+
+          const response = await fetch("/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              images: [contentImage, styleImage],
+              prompt: transferPrompt,
+              aspectRatio: nodeData.aspectRatio,
+              resolution: nodeData.resolution,
+              model: nodeData.model,
+            }),
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+            try {
+              const errorJson = JSON.parse(errorText);
+              errorMessage = errorJson.error || errorMessage;
+            } catch {
+              if (errorText) errorMessage += ` - ${errorText.substring(0, 200)}`;
+            }
+
+            logger.error('api.error', 'Style transfer regeneration failed', {
+              nodeId,
+              status: response.status,
+              errorMessage,
+            });
+
+            updateNodeData(nodeId, {
+              status: "error",
+              error: errorMessage,
+            });
+            set({ isRunning: false, currentNodeId: null });
+            await logger.endSession();
+            return;
+          }
+
+          const result = await response.json();
+
+          if (result.success && result.image) {
+            updateNodeData(nodeId, {
+              outputImage: result.image,
+              status: "complete",
+              error: null,
+            });
+
+            // Track cost
+            const generationCost = calculateGenerationCost(nodeData.model, nodeData.resolution);
+            get().addIncurredCost(generationCost);
+          } else {
+            logger.error('api.error', 'Style transfer regeneration failed', {
+              nodeId,
+              error: result.error,
+            });
+            updateNodeData(nodeId, {
+              status: "error",
+              error: result.error || "Style transfer failed",
+            });
+            set({ isRunning: false, currentNodeId: null });
+            await logger.endSession();
+            return;
+          }
+        } catch (error) {
+          let errorMessage = "Style transfer failed";
+          if (error instanceof Error) {
+            errorMessage = error.message;
+          }
+
+          logger.error('node.error', 'styleTransfer regeneration failed', {
+            nodeId,
+            errorMessage,
+          }, error instanceof Error ? error : undefined);
+
+          updateNodeData(nodeId, {
+            status: "error",
+            error: errorMessage,
+          });
+          set({ isRunning: false, currentNodeId: null });
+          await logger.endSession();
+          return;
+        }
       }
 
       logger.info('node.execution', 'Node regeneration completed successfully', { nodeId });
@@ -1756,6 +2137,11 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+
+    set({
+      lastSavedAt: Date.now(),
+      hasUnsavedChanges: false,
+    });
   },
 
   loadWorkflow: (workflow: WorkflowFile) => {
@@ -1840,7 +2226,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   // Auto-save actions
-  setWorkflowMetadata: (id: string, name: string, path: string, generationsPath: string | null) => {
+  setWorkflowMetadata: (id: string, name: string, path: string | null, generationsPath: string | null) => {
     set({
       workflowId: id,
       workflowName: name,

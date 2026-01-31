@@ -22,6 +22,7 @@ import {
   AnnotationNode,
   PromptNode,
   NanoBananaNode,
+  StyleTransferNode,
   LLMGenerateNode,
   SplitGridNode,
   OutputNode,
@@ -41,6 +42,7 @@ const nodeTypes: NodeTypes = {
   annotation: AnnotationNode,
   prompt: PromptNode,
   nanoBanana: NanoBananaNode,
+  styleTransfer: StyleTransferNode,
   llmGenerate: LLMGenerateNode,
   splitGrid: SplitGridNode,
   output: OutputNode,
@@ -60,8 +62,12 @@ const isValidConnection = (connection: Edge | Connection): boolean => {
   const sourceHandle = connection.sourceHandle;
   const targetHandle = connection.targetHandle;
 
+  // Define which handles are image types (source or target)
+  const imageHandles = ["image", "content", "style"];
+  const textHandles = ["text"];
+
   // Strict type matching: image <-> image, text <-> text
-  if (sourceHandle === "image" && targetHandle !== "image") {
+  if (imageHandles.includes(sourceHandle || "") && !imageHandles.includes(targetHandle || "")) {
     logger.warn('connection.validation', 'Connection validation failed: type mismatch', {
       source: connection.source,
       target: connection.target,
@@ -71,7 +77,7 @@ const isValidConnection = (connection: Edge | Connection): boolean => {
     });
     return false;
   }
-  if (sourceHandle === "text" && targetHandle !== "text") {
+  if (textHandles.includes(sourceHandle || "") && !textHandles.includes(targetHandle || "")) {
     logger.warn('connection.validation', 'Connection validation failed: type mismatch', {
       source: connection.source,
       target: connection.target,
@@ -96,6 +102,8 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: [], outputs: ["text"] };
     case "nanoBanana":
       return { inputs: ["image", "text"], outputs: ["image"] };
+    case "styleTransfer":
+      return { inputs: ["content", "style", "text"], outputs: ["image"] };
     case "llmGenerate":
       return { inputs: ["text", "image"], outputs: ["text"] };
     case "splitGrid":
@@ -293,7 +301,11 @@ export function WorkflowCanvas() {
 
       const { clientX, clientY } = event as MouseEvent;
       const fromHandleId = connectionState.fromHandle?.id || null;
-      const fromHandleType = (fromHandleId === "image" || fromHandleId === "text") ? fromHandleId : null;
+      const fromHandleType = (fromHandleId === "image" || fromHandleId === "content" || fromHandleId === "style") 
+        ? "image" 
+        : fromHandleId === "text" 
+          ? "text" 
+          : null;
       const isFromSource = connectionState.fromHandle?.type === "source";
 
       // Check if we dropped on a node by looking for node elements under the cursor
@@ -704,6 +716,9 @@ export function WorkflowCanvas() {
           case "g":
             nodeType = "nanoBanana";
             break;
+          case "t":
+            nodeType = "styleTransfer";
+            break;
           case "l":
             nodeType = "llmGenerate";
             break;
@@ -721,6 +736,7 @@ export function WorkflowCanvas() {
             annotation: { width: 300, height: 280 },
             prompt: { width: 320, height: 220 },
             nanoBanana: { width: 300, height: 300 },
+            styleTransfer: { width: 320, height: 340 },
             llmGenerate: { width: 320, height: 360 },
             splitGrid: { width: 300, height: 320 },
             output: { width: 320, height: 320 },

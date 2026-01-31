@@ -66,6 +66,12 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
     updateNodeData(id, { outputText: null, status: "idle", error: null });
   }, [id, updateNodeData]);
 
+  const duplicateNode = useWorkflowStore((state) => state.duplicateNode);
+
+  const handleDuplicate = useCallback(() => {
+    duplicateNode(id);
+  }, [id, duplicateNode]);
+
   const provider = nodeData.provider || "google";
   const availableModels = MODELS[provider] || MODELS.google;
   const model = availableModels.some(m => m.value === nodeData.model)
@@ -80,6 +86,7 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
       comment={nodeData.comment}
       onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
       onCommentChange={(comment) => updateNodeData(id, { comment: comment || undefined })}
+      onDuplicate={handleDuplicate}
       selected={selected}
       hasError={nodeData.status === "error"}
     >

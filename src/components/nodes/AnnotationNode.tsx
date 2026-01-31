@@ -84,6 +84,12 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
     });
   }, [id, updateNodeData]);
 
+  const duplicateNode = useWorkflowStore((state) => state.duplicateNode);
+
+  const handleDuplicate = useCallback(() => {
+    duplicateNode(id);
+  }, [id, duplicateNode]);
+
   const displayImage = nodeData.outputImage || nodeData.sourceImage;
 
   return (
@@ -94,6 +100,7 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
       comment={nodeData.comment}
       onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
       onCommentChange={(comment) => updateNodeData(id, { comment: comment || undefined })}
+      onDuplicate={handleDuplicate}
       selected={selected}
     >
       <input

@@ -14,6 +14,7 @@ interface BaseNodeProps {
   onCommentChange?: (comment: string) => void;
   onExpand?: () => void;
   onRun?: () => void;
+  onDuplicate?: () => void;
   children: ReactNode;
   selected?: boolean;
   isExecuting?: boolean;
@@ -32,6 +33,7 @@ export function BaseNode({
   onCommentChange,
   onExpand,
   onRun,
+  onDuplicate,
   children,
   selected = false,
   isExecuting = false,
@@ -345,6 +347,24 @@ export function BaseNode({
                 </svg>
                 <span className="max-w-0 opacity-0 whitespace-nowrap text-[10px] transition-all duration-200 ease-in-out overflow-hidden group-hover:max-w-[60px] group-hover:opacity-100 group-hover:ml-1">
                   Run node
+                </span>
+              </button>
+            </div>
+          )}
+
+          {/* Duplicate Button */}
+          {onDuplicate && (
+            <div className="relative ml-2 shrink-0 group">
+              <button
+                onClick={onDuplicate}
+                className="nodrag nopan p-0.5 rounded transition-all duration-200 ease-in-out text-neutral-500 group-hover:text-neutral-200 border border-neutral-600 flex items-center overflow-hidden group-hover:pr-2"
+                title="Duplicate this node"
+              >
+                <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                <span className="max-w-0 opacity-0 whitespace-nowrap text-[10px] transition-all duration-200 ease-in-out overflow-hidden group-hover:max-w-[60px] group-hover:opacity-100 group-hover:ml-1">
+                  Duplicate
                 </span>
               </button>
             </div>
